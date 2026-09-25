@@ -227,6 +227,17 @@ export function syncSkillsBeta(
  * afk-mode-2026-01-31 is the second beta Claude Code attaches while auto mode is
  * active (captured on the wire in #14186). Dropping it strips the auto-mode
  * negotiation the upstream expects next to the classifier pair.
+ *
+ * The per-message effort betas gate Anthropic's message-level `output_config`
+ * (an effort-only system message carrying `output_config.effort`, sent by
+ * Claude Code to change effort mid-conversation). Without its beta upstream
+ * rejects the body field the passthrough kept with
+ * `400 messages.N.output_config: Extra inputs are not permitted` (#14746) —
+ * the same field-travels/beta-drops shape as the dangerous-tool-use pair above.
+ * Anthropic documents the feature under `mid-conversation-output-config-2026-07-01`;
+ * AWS Bedrock lists the three aliases below for the same schema gate. Only
+ * tokens the client itself negotiated are ever forwarded, so carrying all four
+ * costs nothing and stops an alias-using client from hitting the same 400.
  */
 export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   "tool-search-tool-2025-10-19",
@@ -238,6 +249,11 @@ export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   // gate (#9505), so a client that sent it must keep it through the merge —
   // otherwise its effort negotiation is silently dropped.
   "effort-2025-11-24",
+  // Per-message effort (message-level output_config) — see doc comment above.
+  "mid-conversation-output-config-2026-07-01",
+  "mid-conversation-effort-2026-08-01",
+  "per-turn-control-2026-07-01",
+  "per-message-effort-2026-07-01",
   // Fable 5.1 betas (@ai-sdk/anthropic sends both automatically): without them
   // upstream rejects `thinking.block_binding` / `thinking.display` with 400.
   "thinking-binding-controls-2026-08-01",
