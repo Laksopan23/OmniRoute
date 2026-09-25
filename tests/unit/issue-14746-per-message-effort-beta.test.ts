@@ -22,7 +22,10 @@
  *
  * Holes covered here:
  *   1. FORWARDABLE_CLIENT_BETAS dropped the client-negotiated beta → the
- *      allowlist merge now forwards it (buildHeaders + execute paths)
+ *      allowlist merge now forwards it (buildHeaders + execute paths), for
+ *      both Anthropic's documented token and Claude Code's own wire token
+ *      `per-turn-control-2026-07-01` (captured from cc@2.1.282:
+ *      C("per_message_effort","per-turn-control-2026-07-01"))
  *   2. clients with no `anthropic-beta` header of their own got no beta at all →
  *      selectBetaFlags now derives it from the body shape (a message carries
  *      output_config), same rule as mid-conversation-system-2026-04-07
@@ -42,22 +45,28 @@ import { selectBetaFlags } from "../../open-sse/executors/claudeIdentity.ts";
 import { DefaultExecutor } from "../../open-sse/executors/default.ts";
 
 const PER_MESSAGE_EFFORT_BETA = "mid-conversation-output-config-2026-07-01";
-// Anthropic documents the feature under the canonical beta above; AWS Bedrock
-// lists these three aliases for the same schema gate. The allowlist only ever
-// forwards tokens the client itself negotiated, so carrying all four costs
-// nothing and stops a client using an alias from hitting the same 400.
-const PER_TURN_EFFORT_BETAS = [
-  PER_MESSAGE_EFFORT_BETA,
+// Claude Code's own wire token for the same feature — captured from the shipped
+// @anthropic-ai/claude-code@2.1.282 binary:
+//   C("per_message_effort","per-turn-control-2026-07-01")
+// Anthropic documents the canonical token above; AWS Bedrock's
+// adaptive-thinking guide additionally lists `mid-conversation-effort-2026-08-01`
+// and `per-message-effort-2026-07-01` as aliases — those two are trimmed from
+// the allowlist (no known client sends them; OmniRoute's Bedrock executor does
+// not negotiate anthropic_beta). Only tokens with a hard source stay.
+const CLIENT_WIRE_EFFORT_BETA = "per-turn-control-2026-07-01";
+const PER_TURN_EFFORT_BETAS = [PER_MESSAGE_EFFORT_BETA, CLIENT_WIRE_EFFORT_BETA];
+const TRIMMED_EFFORT_ALIASES = [
   "mid-conversation-effort-2026-08-01",
-  "per-turn-control-2026-07-01",
   "per-message-effort-2026-07-01",
 ];
 
+// Shape of the anthropic-beta header a real Claude Code 2.1.282 session sends
+// on a per-message-effort request (Claude Code flags + its wire token).
 const CC_BETA_HEADER = [
   "claude-code-20250219",
   "oauth-2025-04-20",
   "effort-2025-11-24",
-  PER_MESSAGE_EFFORT_BETA,
+  CLIENT_WIRE_EFFORT_BETA,
 ].join(",");
 
 /** Opus agent request carrying the effort-only directive at messages[2] (the captured #14746 shape). */
@@ -114,9 +123,21 @@ describe("#14746 FORWARDABLE_CLIENT_BETAS carries the per-message effort betas",
     });
   }
 
+  test("AWS-only aliases are trimmed — every allowlisted token has a hard source", () => {
+    for (const alias of TRIMMED_EFFORT_ALIASES) {
+      assert.ok(
+        !FORWARDABLE_CLIENT_BETAS.includes(alias),
+        `${alias} must stay trimmed (AWS-listed alias, no client sends it through OmniRoute)`
+      );
+    }
+  });
+
   test("mergeClientAnthropicBeta does not duplicate the beta already in the base set", () => {
     const merged = tokens(
-      mergeClientAnthropicBeta(`claude-code-20250219,${PER_MESSAGE_EFFORT_BETA}`, CC_BETA_HEADER)
+      mergeClientAnthropicBeta(
+        `claude-code-20250219,${PER_MESSAGE_EFFORT_BETA}`,
+        `${CC_BETA_HEADER},${PER_MESSAGE_EFFORT_BETA}`
+      )
     );
     assert.equal(
       merged.filter((token) => token === PER_MESSAGE_EFFORT_BETA).length,
@@ -151,7 +172,7 @@ describe("#14746 selectBetaFlags derives the beta from the body shape", () => {
     );
   });
 
-  test("native claude pipeline: directive body + Claude Code header → beta sent exactly once", () => {
+  test("native claude pipeline: directive body + Claude Code header → canonical deduped, wire token forwarded", () => {
     const outbound = tokens(
       mergeClientAnthropicBeta(
         selectBetaFlags(directiveBody(), null, CC_BETA_HEADER),
@@ -161,7 +182,11 @@ describe("#14746 selectBetaFlags derives the beta from the body shape", () => {
     assert.equal(
       outbound.filter((token) => token === PER_MESSAGE_EFFORT_BETA).length,
       1,
-      "shape-derived + client-negotiated must dedupe to a single token"
+      "shape-derived canonical beta must dedupe to a single token"
+    );
+    assert.ok(
+      outbound.includes(CLIENT_WIRE_EFFORT_BETA),
+      "Claude Code's own per-turn-control token must survive the merge alongside it"
     );
   });
 
@@ -182,8 +207,8 @@ describe("#14746 DefaultExecutor.buildHeaders / claude provider", () => {
     const key = Object.keys(headers).find((name) => name.toLowerCase() === "anthropic-beta");
     const outbound = key ? tokens(headers[key]) : [];
     assert.ok(
-      outbound.includes(PER_MESSAGE_EFFORT_BETA),
-      `outbound beta missing ${PER_MESSAGE_EFFORT_BETA}: ${outbound.join(",")}`
+      outbound.includes(CLIENT_WIRE_EFFORT_BETA),
+      `Claude Code's wire token missing from outbound beta: ${outbound.join(",")}`
     );
   });
 

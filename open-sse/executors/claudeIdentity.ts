@@ -416,7 +416,10 @@ export function selectBetaFlags(
   if (isOpusAgent) flags.push("mid-conversation-system-2026-04-07");
   // Derive the per-message effort beta from the body shape — same rule as
   // mid-conversation-system above — so a directive-carrying body is valid even
-  // when the client negotiated no anthropic-beta of its own (#14746). A body
+  // when the client negotiated no anthropic-beta of its own (#14746). The
+  // token is Anthropic's documented beta for the feature ("requires the beta
+  // header mid-conversation-output-config-2026-07-01",
+  // https://platform.claude.com/docs/en/build-with-claude/effort); a body
   // without the field never gains it (fingerprint: shape-matched sets only).
   if (hasMessageOutputConfig) flags.push("mid-conversation-output-config-2026-07-01");
   // Thinking betas: gated on the client header (#3415). interleaved-thinking forces

@@ -234,10 +234,22 @@ export function syncSkillsBeta(
  * rejects the body field the passthrough kept with
  * `400 messages.N.output_config: Extra inputs are not permitted` (#14746) —
  * the same field-travels/beta-drops shape as the dangerous-tool-use pair above.
- * Anthropic documents the feature under `mid-conversation-output-config-2026-07-01`;
- * AWS Bedrock lists the three aliases below for the same schema gate. Only
- * tokens the client itself negotiated are ever forwarded, so carrying all four
- * costs nothing and stops an alias-using client from hitting the same 400.
+ * Two tokens are kept, each with a hard source:
+ *   - `mid-conversation-output-config-2026-07-01` — Anthropic's documented
+ *     beta for the feature ("Per-message effort is in beta and requires the
+ *     beta header ...", https://platform.claude.com/docs/en/build-with-claude/effort;
+ *     the doc's curl example uses the exact directive shape we receive).
+ *     This is the token selectBetaFlags derives from the body shape below.
+ *   - `per-turn-control-2026-07-01` — the token Claude Code itself puts on
+ *     the wire, captured from @anthropic-ai/claude-code@2.1.282
+ *     (`C("per_message_effort","per-turn-control-2026-07-01")` in the shipped
+ *     binary). Forwarding it is what keeps a real Claude Code session working
+ *     through the proxy.
+ * AWS Bedrock's adaptive-thinking guide documents the same schema gate and
+ * quotes the exact 400 above; it also lists `mid-conversation-effort-2026-08-01`
+ * and `per-message-effort-2026-07-01` as aliases. Those two are deliberately
+ * trimmed: no known client sends them, and OmniRoute's Bedrock executor does
+ * not negotiate `anthropic_beta` at all.
  */
 export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   "tool-search-tool-2025-10-19",
@@ -249,11 +261,9 @@ export const FORWARDABLE_CLIENT_BETAS = Object.freeze([
   // gate (#9505), so a client that sent it must keep it through the merge —
   // otherwise its effort negotiation is silently dropped.
   "effort-2025-11-24",
-  // Per-message effort (message-level output_config) — see doc comment above.
+  // Per-message effort (message-level output_config) — sources in doc comment above.
   "mid-conversation-output-config-2026-07-01",
-  "mid-conversation-effort-2026-08-01",
   "per-turn-control-2026-07-01",
-  "per-message-effort-2026-07-01",
   // Fable 5.1 betas (@ai-sdk/anthropic sends both automatically): without them
   // upstream rejects `thinking.block_binding` / `thinking.display` with 400.
   "thinking-binding-controls-2026-08-01",
